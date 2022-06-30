@@ -309,7 +309,7 @@ int storage_get_item(conn *c, item *it, mc_resp *resp) {
                 do_cache_free(c->thread->io_cache, p);
                 return -1;
             }
-            eio->iov[ciovcnt].iov_base = chunk->data;
+            eio->iov[ciovcnt].iov_base = chunk->payload->data;
             eio->iov[ciovcnt].iov_len = (remain < chunk->size) ? remain : chunk->size;
             chunk->used = (remain < chunk->size) ? remain : chunk->size;
             remain -= chunk->size;
@@ -530,7 +530,7 @@ static int storage_write(void *storage, const int clsid, const int item_age) {
                     // copy data in like it were one large object.
                     while (sch && remain) {
                         assert(remain >= sch->used);
-                        memcpy((char *)io.buf+copied, sch->data, sch->used);
+                        memcpy((char *)io.buf+copied, sch->payload->data, sch->used);
                         // FIXME: use one variable?
                         remain -= sch->used;
                         copied += sch->used;

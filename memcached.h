@@ -51,6 +51,13 @@
 #include <openssl/ssl.h>
 #endif
 
+#include "montage_global_api_c.h"
+
+/* We don't yet know how Montage would handle these options */
+#ifdef NEED_ALIGN
+#error Montage cannost handle NEED_ALIGN
+#endif
+
 /* for NAPI pinning feature */
 #ifndef SO_INCOMING_NAPI_ID
 #define SO_INCOMING_NAPI_ID 56
@@ -114,28 +121,36 @@
 
 /* warning: don't use these macros with a function, as it evals its arg twice */
 #define ITEM_get_cas(i) (((i)->it_flags & ITEM_CAS) ? \
-        (i)->data->cas : (uint64_t)0)
+        (i)->payload->data->cas : (uint64_t)0)
 
 #define ITEM_set_cas(i,v) { \
     if ((i)->it_flags & ITEM_CAS) { \
-        (i)->data->cas = v; \
+        (i)->payload->data->cas = v; \
     } \
 }
 
-#define ITEM_key(item) (((char*)&((item)->data)) \
+#define ITEM_key(item) (((char*)&((item)->payload->data)) \
          + (((item)->it_flags & ITEM_CAS) ? sizeof(uint64_t) : 0))
 
-#define ITEM_suffix(item) ((char*) &((item)->data) + (item)->nkey + 1 \
+#define ITEM_suffix(item) ((char*) &((item)->payload->data) + (item)->nkey + 1 \
          + (((item)->it_flags & ITEM_CAS) ? sizeof(uint64_t) : 0))
 
-#define ITEM_data(item) ((char*) &((item)->data) + (item)->nkey + 1 \
+#define ITEM_data(item) ((char*) &((item)->payload->data) + (item)->nkey + 1 \
          + (((item)->it_flags & ITEM_CFLAGS) ? sizeof(uint32_t) : 0) \
          + (((item)->it_flags & ITEM_CAS) ? sizeof(uint64_t) : 0))
 
-#define ITEM_ntotal(item) (sizeof(struct _stritem) + (item)->nkey + 1 \
+#define ITEM_ntotal_transient(item) (sizeof(struct _stritem))
+
+#define ITEM_ntotal_payload(item) (sizeof(struct _itempayload) + (item)->nkey + 1 \
          + (item)->nbytes \
          + (((item)->it_flags & ITEM_CFLAGS) ? sizeof(uint32_t) : 0) \
          + (((item)->it_flags & ITEM_CAS) ? sizeof(uint64_t) : 0))
+
+#define ITEM_ntotal(item) (ITEM_ntotal_transient(item) \
+         + ITEM_ntotal_payload(item))
+
+#define Montage_malloc(sz) (montage_malloc_raw(sz))
+#define Montage_free(p) (montage_free_raw(p))
 
 #define ITEM_clsid(item) ((item)->slabs_clsid & ~(3<<6))
 #define ITEM_lruid(item) ((item)->slabs_clsid & (3<<6))
@@ -556,6 +571,24 @@ extern struct settings settings;
 #define ITEM_KEY_BINARY 4096
 
 /**
+ * item payload structure for Montage
+ */
+typedef struct _itempayload {
+    montage_meta_t mmeta;
+
+    /* this odd type prevents type-punning issues when we do
+     * the little shuffle to save space when not using CAS. */
+    union {
+        uint64_t cas;
+        char end;
+    } data[];
+    /* if it_flags & ITEM_CAS we have 8 bytes CAS */
+    /* then null-terminated key */
+    /* then " flags length\r\n" (no terminating null) */
+    /* then data with terminating \r\n (no terminating null; it's binary!) */
+} item_payload;
+
+/**
  * Structure for storing items within memcached.
  */
 typedef struct _stritem {
@@ -571,16 +604,8 @@ typedef struct _stritem {
     uint16_t        it_flags;   /* ITEM_* above */
     uint8_t         slabs_clsid;/* which slab class we're in */
     uint8_t         nkey;       /* key length, w/terminating null and padding */
-    /* this odd type prevents type-punning issues when we do
-     * the little shuffle to save space when not using CAS. */
-    union {
-        uint64_t cas;
-        char end;
-    } data[];
-    /* if it_flags & ITEM_CAS we have 8 bytes CAS */
-    /* then null-terminated key */
-    /* then " flags length\r\n" (no terminating null) */
-    /* then data with terminating \r\n (no terminating null; it's binary!) */
+    
+    item_payload      *payload;   /* pointer to a Montage payload */
 } item;
 
 // TODO: If we eventually want user loaded modules, we can't use an enum :(
@@ -605,6 +630,15 @@ typedef struct {
     uint64_t        checked;    /* items examined during this crawl. */
 } crawler;
 
+/**
+ * item chunk payload structure for Montage 
+ */
+typedef struct _item_chunk_payload{
+    montage_meta_t mmeta;
+
+    char data[];
+} item_chunk_payload;
+
 /* Header when an item is actually a chunk of another item. */
 typedef struct _strchunk {
     struct _strchunk *next;     /* points within its own chain. */
@@ -617,7 +651,7 @@ typedef struct _strchunk {
     uint16_t         it_flags;  /* ITEM_* above. */
     uint8_t          slabs_clsid; /* Same as above. */
     uint8_t          orig_clsid; /* For obj hdr chunks slabs_clsid is fake. */
-    char data[];
+    item_chunk_payload  *payload;
 } item_chunk;
 
 #ifdef NEED_ALIGN
@@ -632,9 +666,7 @@ static inline char *ITEM_schunk(item *it) {
     return ((char *) &(it->data)) + offset;
 }
 #else
-#define ITEM_schunk(item) ((char*) &((item)->data) + (item)->nkey + 1 \
-         + (((item)->it_flags & ITEM_CFLAGS) ? sizeof(uint32_t) : 0) \
-         + (((item)->it_flags & ITEM_CAS) ? sizeof(uint64_t) : 0))
+#define ITEM_schunk(item) ((char*) (item) + sizeof(struct _stritem))
 #endif
 
 #ifdef EXTSTORE
@@ -718,6 +750,7 @@ typedef struct {
     void *proxy_stats;
     // TODO: add ctx object so we can attach to queue.
 #endif
+    int montage_tid;
 } LIBEVENT_THREAD;
 
 /**

@@ -228,6 +228,7 @@ item_chunk *do_item_alloc_chunk(item_chunk *ch, const size_t bytes_remain) {
     item_chunk *nch = (item_chunk *) do_item_alloc_pull(size, id);
     if (nch == NULL)
         return NULL;
+    nch->payload = (item_chunk_payload *) Montage_malloc(sizeof(struct _item_chunk_payload) + size - sizeof(item_chunk));
 
     // link in.
     // ITEM_CHUNK[ED] bits need to be protected by the slabs lock.
@@ -289,6 +290,11 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
             it->it_flags |= ITEM_CHUNKED;
     } else {
         it = do_item_alloc_pull(ntotal, id);
+        if (it) {
+            it->payload = (item_payload *) Montage_malloc(
+                sizeof(struct _itempayload) + nkey + 1 + nbytes + nsuffix +
+                (settings.use_cas? sizeof(uint64_t) : 0));
+        }
     }
 
     if (it == NULL) {
@@ -323,10 +329,10 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
     it->it_flags |= nsuffix != 0 ? ITEM_CFLAGS : 0;
     it->nkey = nkey;
     it->nbytes = nbytes;
-    memcpy(ITEM_key(it), key, nkey);
+    memcpy(ITEM_key(it), key, nkey); /* MON: memcpy to payload */
     it->exptime = exptime;
     if (nsuffix > 0) {
-        memcpy(ITEM_suffix(it), &flags, sizeof(flags));
+        memcpy(ITEM_suffix(it), &flags, sizeof(flags)); /* MON: memcpy to payload */
     }
 
     /* Initialize internal chunk. */
@@ -381,7 +387,7 @@ bool item_size_ok(const size_t nkey, const int flags, const int nbytes) {
 /* fixing stats/references during warm start */
 void do_item_link_fixup(item *it) {
     item **head, **tail;
-    int ntotal = ITEM_ntotal(it);
+    int ntotal = ITEM_ntotal_transient(it);
     uint32_t hv = hash(ITEM_key(it), it->nkey);
     assoc_insert(it, hv);
 
@@ -424,7 +430,7 @@ static void do_item_link_q(item *it) { /* item is the new head */
         sizes_bytes[it->slabs_clsid] += ITEM_ntotal(it);
     }
 #else
-    sizes_bytes[it->slabs_clsid] += ITEM_ntotal(it);
+    sizes_bytes[it->slabs_clsid] += ITEM_ntotal_transient(it);
 #endif
 
     return;
@@ -469,7 +475,7 @@ static void do_item_unlink_q(item *it) {
         sizes_bytes[it->slabs_clsid] -= ITEM_ntotal(it);
     }
 #else
-    sizes_bytes[it->slabs_clsid] -= ITEM_ntotal(it);
+    sizes_bytes[it->slabs_clsid] -= ITEM_ntotal_transient(it);
 #endif
 
     return;

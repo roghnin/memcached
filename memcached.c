@@ -1476,7 +1476,7 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
                 ? dch->size - dch->used : sch->used - copied;
             if (remain < todo)
                 todo = remain;
-            memcpy(dch->data + dch->used, sch->data + copied, todo);
+            memcpy(dch->payload->data + dch->used, sch->payload->data + copied, todo); /* MON: memcpy to payload */
             dch->used += todo;
             copied += todo;
             remain -= todo;
@@ -1504,7 +1504,7 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
             int todo = (dch->size - dch->used < len - done)
                 ? dch->size - dch->used : len - done;
             //assert(dch->size - dch->used != 0);
-            memcpy(dch->data + dch->used, ITEM_data(s_it) + done, todo);
+            memcpy(dch->payload->data + dch->used, ITEM_data(s_it) + done, todo); /* MON: memcpy to payload */
             done += todo;
             dch->used += todo;
             assert(dch->used <= dch->size);
@@ -2571,7 +2571,7 @@ static int _transmit_pre(conn *c, struct iovec *iovs, int iovused, bool one_resp
                             skip = done;
                             done = 0;
                         }
-                        iovs[iovused].iov_base = ch->data + skip;
+                        iovs[iovused].iov_base = ch->payload->data + skip;
                         // Stupid binary protocol makes this go negative.
                         iovs[iovused].iov_len = ch->used - skip > todo ? todo : ch->used - skip;
                         iovused++;
@@ -2895,7 +2895,7 @@ static int read_into_chunked_item(conn *c) {
             int tocopy = c->rbytes > c->rlbytes ? c->rlbytes : c->rbytes;
             tocopy = tocopy > unused ? unused : tocopy;
             if (c->ritem != c->rcurr) {
-                memmove(ch->data + ch->used, c->rcurr, tocopy);
+                memmove(ch->payload->data + ch->used, c->rcurr, tocopy);
             }
             total += tocopy;
             c->rlbytes -= tocopy;
@@ -2907,7 +2907,7 @@ static int read_into_chunked_item(conn *c) {
             }
         } else {
             /*  now try reading from the socket */
-            res = c->read(c, ch->data + ch->used,
+            res = c->read(c, ch->payload->data + ch->used,
                     (unused > c->rlbytes ? c->rlbytes : unused));
             if (res > 0) {
                 pthread_mutex_lock(&c->thread->stats.mutex);
@@ -5913,6 +5913,10 @@ int main (int argc, char **argv) {
         // Also, the callbacks for load() run before _open returns, so we
         // should have the old base in 'meta' as of here.
     }
+
+    montage_init(settings.num_threads + 1);
+    montage_init_thread(0);
+
     // Initialize the hash table _after_ checking restart metadata.
     // We override the hash table start argument with what was live
     // previously, to avoid filling a huge set of items into a tiny hash

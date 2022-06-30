@@ -27,7 +27,8 @@
 /* powers-of-N allocation structures */
 
 typedef struct {
-    unsigned int size;      /* sizes of items */
+    unsigned int size;      /* sizes of items. used only for deciding slab classes */
+    unsigned int transient_size; /* size of transient headers. a fixed number -- max of all possible headers.*/
     unsigned int perslab;   /* how many items per slab */
 
     void *slots;           /* list of item ptrs */
@@ -259,7 +260,8 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
             size += CHUNK_ALIGN_BYTES - (size % CHUNK_ALIGN_BYTES);
 
         slabclass[i].size = size;
-        slabclass[i].perslab = settings.slab_page_size / slabclass[i].size;
+        slabclass[i].transient_size = sizeof(item) + sizeof(item_chunk);
+        slabclass[i].perslab = settings.slab_page_size / slabclass[i].transient_size;
         if (slab_sizes == NULL)
             size *= factor;
         if (settings.verbose > 1) {
@@ -270,7 +272,8 @@ void slabs_init(const size_t limit, const double factor, const bool prealloc, co
 
     power_largest = i;
     slabclass[power_largest].size = settings.slab_chunk_size_max;
-    slabclass[power_largest].perslab = settings.slab_page_size / settings.slab_chunk_size_max;
+    slabclass[power_largest].transient_size = sizeof(item) + sizeof(item_chunk);
+    slabclass[power_largest].perslab = settings.slab_page_size / slabclass[power_largest].transient_size;
     if (settings.verbose > 1) {
         fprintf(stderr, "slab class %3d: chunk size %9u perslab %7u\n",
                 i, slabclass[i].size, slabclass[i].perslab);
@@ -351,7 +354,7 @@ static void split_slab_page_into_freelist(char *ptr, const unsigned int id) {
     int x;
     for (x = 0; x < p->perslab; x++) {
         do_slabs_free(ptr, 0, id);
-        ptr += p->size;
+        ptr += p->transient_size;
     }
 }
 
@@ -371,7 +374,7 @@ static int do_slabs_newslab(const unsigned int id) {
     slabclass_t *g = &slabclass[SLAB_GLOBAL_PAGE_POOL];
     int len = (settings.slab_reassign || settings.slab_chunk_size_max != settings.slab_page_size)
         ? settings.slab_page_size
-        : p->size * p->perslab;
+        : p->transient_size * p->perslab;
     char *ptr;
 
     if ((mem_limit && mem_malloced + len > mem_limit && p->slabs > 0
@@ -479,6 +482,8 @@ static void do_slabs_free_chunked(item *it, const size_t size) {
     while (chunk) {
         assert(chunk->it_flags == ITEM_CHUNK);
         chunk->it_flags = ITEM_SLABBED;
+        Montage_free(chunk->payload);
+        chunk->payload = NULL;
         p = &slabclass[chunk->slabs_clsid];
         next_chunk = chunk->next;
 
@@ -508,6 +513,10 @@ static void do_slabs_free(void *ptr, const size_t size, unsigned int id) {
 
     it = (item *)ptr;
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
+        if (it->payload) {
+            Montage_free(it->payload);
+        }
+        it->payload = NULL;
         it->it_flags = ITEM_SLABBED;
         it->slabs_clsid = id;
         it->prev = 0;
@@ -962,7 +971,7 @@ static int slab_rebalance_move(void) {
                  * refcount 1 (just our own, then fall through and wipe it
                  */
                 /* Check if expired or flushed */
-                ntotal = ITEM_ntotal(it);
+                ntotal = ITEM_ntotal_transient(it);
 #ifdef EXTSTORE
                 if (it->it_flags & ITEM_HDR) {
                     ntotal = (ntotal - it->nbytes) + sizeof(item_hdr);
@@ -1049,7 +1058,7 @@ static int slab_rebalance_move(void) {
 #endif
                         slab_rebal.completed[offset] = 1;
                     } else {
-                        ntotal = ITEM_ntotal(it);
+                        ntotal = ITEM_ntotal_transient(it);
                         do_item_unlink(it, hv);
                         slabs_free(it, ntotal, slab_rebal.s_clsid);
                         /* Swing around again later to remove it from the freelist. */

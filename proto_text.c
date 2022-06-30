@@ -150,13 +150,13 @@ void complete_nread_ascii(conn *c) {
          * chunks.
          */
         if (ch->used > 1) {
-            buf[0] = ch->data[ch->used - 2];
-            buf[1] = ch->data[ch->used - 1];
+            buf[0] = ch->payload->data[ch->used - 2];
+            buf[1] = ch->payload->data[ch->used - 1];
         } else {
             assert(ch->prev);
             assert(ch->used == 1);
-            buf[0] = ch->prev->data[ch->prev->used - 1];
-            buf[1] = ch->data[ch->used - 1];
+            buf[0] = ch->prev->payload->data[ch->prev->used - 1];
+            buf[1] = ch->payload->data[ch->used - 1];
         }
         if (strncmp(buf, "\r\n", 2) == 0) {
             is_valid = true;

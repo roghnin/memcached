@@ -377,8 +377,8 @@ static void complete_update_bin(conn *c) {
         if (ch->size == ch->used)
             ch = ch->next;
         assert(ch->size - ch->used >= 2);
-        ch->data[ch->used] = '\r';
-        ch->data[ch->used + 1] = '\n';
+        ch->payload->data[ch->used] = '\r';
+        ch->payload->data[ch->used + 1] = '\n';
         ch->used += 2;
     }
 
