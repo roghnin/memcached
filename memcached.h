@@ -121,11 +121,12 @@
 
 /* warning: don't use these macros with a function, as it evals its arg twice */
 #define ITEM_get_cas(i) (((i)->it_flags & ITEM_CAS) ? \
-        (i)->payload->data->cas : (uint64_t)0)
+        ((struct _itempayload*)montage_open_read((i)->payload))->data->cas : (uint64_t)0)
 
 #define ITEM_set_cas(i,v) { \
     if ((i)->it_flags & ITEM_CAS) { \
-        (i)->payload->data->cas = v; \
+        ((struct _itempayload*)montage_open_write(&((i)->payload), ITEM_ntotal_payload(i)))->data->cas = v; \
+        montage_register_write((i)->payload); \
     } \
 }
 
@@ -149,8 +150,17 @@
 #define ITEM_ntotal(item) (ITEM_ntotal_transient(item) \
          + ITEM_ntotal_payload(item))
 
-#define Montage_malloc(sz) (montage_malloc_raw(sz))
-#define Montage_free(p) (montage_free_raw(p))
+#define ITEM_chunk_ntotal_payload(item_chunk) (item_chunk->size + sizeof(struct _item_chunk_payload))
+
+#define Montage_malloc(sz) (montage_malloc(sz))
+#define Montage_free(p) (montage_free(p))
+#define Montage_memcpy(payload_p, payload_sz, dst, src, sz) (montage_memcpy(payload_p, payload_sz, dst, src, sz))
+#define Montage_memmove(payload_p, payload_sz, dst, src, sz) (montage_memmove(payload_p, payload_sz, dst, src, sz))
+
+// num_thread + main thread + lru maintainer thread + crawler thread
+#define MONTAGE_THREAD_CNT (settings.num_threads + 3)
+#define LRU_MAINTAINER_MONTAGE_TID (settings.num_threads + 1)
+#define CRAWLER_MONTAGE_TID (settings.num_threads + 2)
 
 #define ITEM_clsid(item) ((item)->slabs_clsid & ~(3<<6))
 #define ITEM_lruid(item) ((item)->slabs_clsid & (3<<6))

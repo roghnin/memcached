@@ -329,10 +329,10 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
     it->it_flags |= nsuffix != 0 ? ITEM_CFLAGS : 0;
     it->nkey = nkey;
     it->nbytes = nbytes;
-    memcpy(ITEM_key(it), key, nkey); /* MON: memcpy to payload */
+    memcpy(ITEM_key(it), key, nkey); // Hs: no need for Montage accessors here; `it` is newlly allocated.
     it->exptime = exptime;
     if (nsuffix > 0) {
-        memcpy(ITEM_suffix(it), &flags, sizeof(flags)); /* MON: memcpy to payload */
+        memcpy(ITEM_suffix(it), &flags, sizeof(flags)); // Hs: no need for Montage accessors here; `it` is newlly allocated.
     }
 
     /* Initialize internal chunk. */
@@ -1586,6 +1586,7 @@ static void *lru_maintainer_thread(void *arg) {
         fprintf(stderr, "Failed to allocate crawler data for LRU maintainer thread\n");
         abort();
     }
+    montage_init_thread(LRU_MAINTAINER_MONTAGE_TID);
     pthread_mutex_init(&cdata->lock, NULL);
     cdata->crawl_complete = true; // kick off the crawler.
     logger *l = logger_create();
@@ -1612,6 +1613,8 @@ static void *lru_maintainer_thread(void *arg) {
         STATS_LOCK();
         stats.lru_maintainer_juggles++;
         STATS_UNLOCK();
+
+        montage_begin_op();
 
         /* Each slab class gets its own sleep to avoid hammering locks */
         for (i = POWER_SMALLEST; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
@@ -1676,6 +1679,8 @@ static void *lru_maintainer_thread(void *arg) {
                 to_sleep = 1000;
             }
         }
+
+        montage_end_op();
     }
     pthread_mutex_unlock(&lru_maintainer_lock);
     sam->free(am);

@@ -119,7 +119,9 @@ int try_read_command_binary(conn *c) {
         c->rbytes -= sizeof(c->binary_header) + extlen + keylen;
         c->rcurr += sizeof(c->binary_header) + extlen + keylen;
 
+        montage_begin_op();
         dispatch_bin_command(c, extbuf);
+        montage_end_op();
     }
 
     return 1;
@@ -369,16 +371,20 @@ static void complete_update_bin(conn *c) {
     /* We don't actually receive the trailing two characters in the bin
      * protocol, so we're going to just set them here */
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
+        montage_open_write(&it->payload, ITEM_ntotal_payload(it));
         *(ITEM_data(it) + it->nbytes - 2) = '\r';
         *(ITEM_data(it) + it->nbytes - 1) = '\n';
+        montage_register_write(it->payload);
     } else {
         assert(c->ritem);
         item_chunk *ch = (item_chunk *) c->ritem;
         if (ch->size == ch->used)
             ch = ch->next;
         assert(ch->size - ch->used >= 2);
+        montage_open_write(&ch->payload, ITEM_chunk_ntotal_payload(ch));
         ch->payload->data[ch->used] = '\r';
         ch->payload->data[ch->used + 1] = '\n';
+        montage_register_write(ch->payload);
         ch->used += 2;
     }
 

@@ -309,6 +309,8 @@ int storage_get_item(conn *c, item *it, mc_resp *resp) {
                 do_cache_free(c->thread->io_cache, p);
                 return -1;
             }
+            // Hs: TODO: there might be more to do in the IO side to be able to use EXTSTORE.
+            // chunk->payload would need to be wrapped with Montage accessors.
             eio->iov[ciovcnt].iov_base = chunk->payload->data;
             eio->iov[ciovcnt].iov_len = (remain < chunk->size) ? remain : chunk->size;
             chunk->used = (remain < chunk->size) ? remain : chunk->size;
@@ -530,7 +532,7 @@ static int storage_write(void *storage, const int clsid, const int item_age) {
                     // copy data in like it were one large object.
                     while (sch && remain) {
                         assert(remain >= sch->used);
-                        memcpy((char *)io.buf+copied, sch->payload->data, sch->used);
+                        memcpy((char *)io.buf+copied, ((item_chunk_payload*)montage_open_read(sch->payload))->data, sch->used);
                         // FIXME: use one variable?
                         remain -= sch->used;
                         copied += sch->used;
@@ -543,7 +545,7 @@ static int storage_write(void *storage, const int clsid, const int item_age) {
                 buf_it->it_flags &= ~ITEM_LINKED;
                 buf_it->exptime = crc32c(0, (char*)io.buf+STORE_OFFSET, orig_ntotal-STORE_OFFSET);
                 extstore_write(storage, &io);
-                item_hdr *hdr = (item_hdr *) ITEM_data(hdr_it);
+                item_hdr *hdr = (item_hdr *) ITEM_data(hdr_it); // Hs: no need to use montage_open_write here.
                 hdr->page_version = io.page_version;
                 hdr->page_id = io.page_id;
                 hdr->offset  = io.offset;
@@ -838,6 +840,7 @@ static void storage_compact_readback(void *storage, logger *l,
 
                 if (do_update) {
                     if (it->refcount == 2) {
+                        // Hs: TODO: montage EXT_STORE support.
                         hdr->page_version = io.page_version;
                         hdr->page_id = io.page_id;
                         hdr->offset = io.offset;
