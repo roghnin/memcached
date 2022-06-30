@@ -40,8 +40,6 @@ typedef struct {
     double free_ratio;
     bool pool_filled_once;
     unsigned int free_mem[MAX_NUMBER_OF_SLAB_CLASSES];
-    item_stats_automove iam_before[MAX_NUMBER_OF_SLAB_CLASSES];
-    item_stats_automove iam_after[MAX_NUMBER_OF_SLAB_CLASSES];
     slab_stats_automove sam_before[MAX_NUMBER_OF_SLAB_CLASSES];
     slab_stats_automove sam_after[MAX_NUMBER_OF_SLAB_CLASSES];
 } slab_automove;
@@ -71,7 +69,6 @@ void *slab_automove_extstore_init(struct settings *settings) {
     }
 
     // do a dry run to fill the before structs
-    fill_item_stats_automove(a->iam_before);
     fill_slab_stats_automove(a->sam_before);
 
     return (void *)a;
@@ -177,7 +174,6 @@ void slab_automove_extstore_run(void *arg, int *src, int *dst) {
     memset(&wg_sum, 0, sizeof(struct window_global));
     window_global_sum(a->window_global, &wg_sum, a->window_size);
     // fill after structs
-    fill_item_stats_automove(a->iam_after);
     fill_slab_stats_automove(a->sam_after);
     a->window_cur++;
 
@@ -197,11 +193,6 @@ void slab_automove_extstore_run(void *arg, int *src, int *dst) {
 
         // if page delta, oom, or evicted delta, mark window dirty
         // classes marked dirty cannot donate memory back to global pool.
-        if (a->iam_after[n].evicted - a->iam_before[n].evicted > 0 ||
-            a->iam_after[n].outofmemory - a->iam_before[n].outofmemory > 0) {
-            wd->evicted = 1;
-            wd->dirty = 1;
-        }
         if (a->sam_after[n].total_pages - a->sam_before[n].total_pages > 0) {
             wd->dirty = 1;
         }
@@ -216,9 +207,6 @@ void slab_automove_extstore_run(void *arg, int *src, int *dst) {
         if (a->sam_after[n].free_chunks > (a->free_mem[n] * 2) && a->free_mem[n] > 0) {
             wd->excess_free = 1;
         }
-
-        // set age into window
-        wd->age = a->iam_after[n].age;
 
         // grab age as average of window total
         uint64_t age = w_sum.age / a->window_size;
@@ -260,8 +248,6 @@ void slab_automove_extstore_run(void *arg, int *src, int *dst) {
         }
     }
 
-    memcpy(a->iam_before, a->iam_after,
-            sizeof(item_stats_automove) * MAX_NUMBER_OF_SLAB_CLASSES);
     memcpy(a->sam_before, a->sam_after,
             sizeof(slab_stats_automove) * MAX_NUMBER_OF_SLAB_CLASSES);
     // only make decisions if window has filled once.

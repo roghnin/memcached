@@ -763,32 +763,7 @@ static void process_stat(conn *c, token_t *tokens, const size_t ntokens) {
     } else if (strcmp(subcommand, "settings") == 0) {
         process_stat_settings(&append_stats, c);
     } else if (strcmp(subcommand, "cachedump") == 0) {
-        char *buf;
-        unsigned int bytes, id, limit = 0;
-
-        if (!settings.dump_enabled) {
-            out_string(c, "CLIENT_ERROR stats cachedump not allowed");
-            return;
-        }
-
-        if (ntokens < 5) {
-            out_string(c, "CLIENT_ERROR bad command line");
-            return;
-        }
-
-        if (!safe_strtoul(tokens[2].value, &id) ||
-            !safe_strtoul(tokens[3].value, &limit)) {
-            out_string(c, "CLIENT_ERROR bad command line format");
-            return;
-        }
-
-        if (id >= MAX_NUMBER_OF_SLAB_CLASSES) {
-            out_string(c, "CLIENT_ERROR Illegal slab id");
-            return;
-        }
-
-        buf = item_cachedump(id, limit, &bytes);
-        write_and_free(c, buf, bytes);
+        out_string(c, "ERROR - cachedump not implemented");
         return;
     } else if (strcmp(subcommand, "conns") == 0) {
         process_stats_conns(&append_stats, c);
@@ -1309,10 +1284,6 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
     }
 
     if (of.locked) {
-        // Delayed bump so we could get fetched/last access time pre-update.
-        if (!of.no_update && it != NULL) {
-            do_item_bump(c, it, hv);
-        }
         item_unlock(hv);
     }
 
@@ -2347,62 +2318,6 @@ static void process_memlimit_command(conn *c, token_t *tokens, const size_t ntok
     }
 }
 
-static void process_lru_command(conn *c, token_t *tokens, const size_t ntokens) {
-    uint32_t pct_hot;
-    uint32_t pct_warm;
-    double hot_factor;
-    int32_t ttl;
-    double factor;
-
-    set_noreply_maybe(c, tokens, ntokens);
-
-    if (strcmp(tokens[1].value, "tune") == 0 && ntokens >= 7) {
-        if (!safe_strtoul(tokens[2].value, &pct_hot) ||
-            !safe_strtoul(tokens[3].value, &pct_warm) ||
-            !safe_strtod(tokens[4].value, &hot_factor) ||
-            !safe_strtod(tokens[5].value, &factor)) {
-            out_string(c, "ERROR");
-        } else {
-            if (pct_hot + pct_warm > 80) {
-                out_string(c, "ERROR hot and warm pcts must not exceed 80");
-            } else if (factor <= 0 || hot_factor <= 0) {
-                out_string(c, "ERROR hot/warm age factors must be greater than 0");
-            } else {
-                settings.hot_lru_pct = pct_hot;
-                settings.warm_lru_pct = pct_warm;
-                settings.hot_max_factor = hot_factor;
-                settings.warm_max_factor = factor;
-                out_string(c, "OK");
-            }
-        }
-    } else if (strcmp(tokens[1].value, "mode") == 0 && ntokens >= 4 &&
-               settings.lru_maintainer_thread) {
-        if (strcmp(tokens[2].value, "flat") == 0) {
-            settings.lru_segmented = false;
-            out_string(c, "OK");
-        } else if (strcmp(tokens[2].value, "segmented") == 0) {
-            settings.lru_segmented = true;
-            out_string(c, "OK");
-        } else {
-            out_string(c, "ERROR");
-        }
-    } else if (strcmp(tokens[1].value, "temp_ttl") == 0 && ntokens >= 4 &&
-               settings.lru_maintainer_thread) {
-        if (!safe_strtol(tokens[2].value, &ttl)) {
-            out_string(c, "ERROR");
-        } else {
-            if (ttl < 0) {
-                settings.temp_lru = false;
-            } else {
-                settings.temp_lru = true;
-                settings.temporary_ttl = ttl;
-            }
-            out_string(c, "OK");
-        }
-    } else {
-        out_string(c, "ERROR");
-    }
-}
 #ifdef EXTSTORE
 static void process_extstore_command(conn *c, token_t *tokens, const size_t ntokens) {
     set_noreply_maybe(c, tokens, ntokens);
@@ -2577,118 +2492,6 @@ static void process_slabs_command(conn *c, token_t *tokens, const size_t ntokens
     }
 }
 
-static void process_lru_crawler_command(conn *c, token_t *tokens, const size_t ntokens) {
-    if (ntokens == 4 && strcmp(tokens[COMMAND_TOKEN + 1].value, "crawl") == 0) {
-        int rv;
-        if (settings.lru_crawler == false) {
-            out_string(c, "CLIENT_ERROR lru crawler disabled");
-            return;
-        }
-
-        rv = lru_crawler_crawl(tokens[2].value, CRAWLER_EXPIRED, NULL, 0,
-                settings.lru_crawler_tocrawl);
-        switch(rv) {
-        case CRAWLER_OK:
-            out_string(c, "OK");
-            break;
-        case CRAWLER_RUNNING:
-            out_string(c, "BUSY currently processing crawler request");
-            break;
-        case CRAWLER_BADCLASS:
-            out_string(c, "BADCLASS invalid class id");
-            break;
-        case CRAWLER_NOTSTARTED:
-            out_string(c, "NOTSTARTED no items to crawl");
-            break;
-        case CRAWLER_ERROR:
-            out_string(c, "ERROR an unknown error happened");
-            break;
-        }
-        return;
-    } else if (ntokens == 4 && strcmp(tokens[COMMAND_TOKEN + 1].value, "metadump") == 0) {
-        if (settings.lru_crawler == false) {
-            out_string(c, "CLIENT_ERROR lru crawler disabled");
-            return;
-        }
-        if (!settings.dump_enabled) {
-            out_string(c, "ERROR metadump not allowed");
-            return;
-        }
-        if (resp_has_stack(c)) {
-            out_string(c, "ERROR cannot pipeline other commands before metadump");
-            return;
-        }
-
-        int rv = lru_crawler_crawl(tokens[2].value, CRAWLER_METADUMP,
-                c, c->sfd, LRU_CRAWLER_CAP_REMAINING);
-        switch(rv) {
-            case CRAWLER_OK:
-                // TODO: documentation says this string is returned, but
-                // it never was before. We never switch to conn_write so
-                // this o_s call never worked. Need to talk to users and
-                // decide if removing the OK from docs is fine.
-                //out_string(c, "OK");
-                // TODO: Don't reuse conn_watch here.
-                conn_set_state(c, conn_watch);
-                event_del(&c->event);
-                break;
-            case CRAWLER_RUNNING:
-                out_string(c, "BUSY currently processing crawler request");
-                break;
-            case CRAWLER_BADCLASS:
-                out_string(c, "BADCLASS invalid class id");
-                break;
-            case CRAWLER_NOTSTARTED:
-                out_string(c, "NOTSTARTED no items to crawl");
-                break;
-            case CRAWLER_ERROR:
-                out_string(c, "ERROR an unknown error happened");
-                break;
-        }
-        return;
-    } else if (ntokens == 4 && strcmp(tokens[COMMAND_TOKEN + 1].value, "tocrawl") == 0) {
-        uint32_t tocrawl;
-         if (!safe_strtoul(tokens[2].value, &tocrawl)) {
-            out_string(c, "CLIENT_ERROR bad command line format");
-            return;
-        }
-        settings.lru_crawler_tocrawl = tocrawl;
-        out_string(c, "OK");
-        return;
-    } else if (ntokens == 4 && strcmp(tokens[COMMAND_TOKEN + 1].value, "sleep") == 0) {
-        uint32_t tosleep;
-        if (!safe_strtoul(tokens[2].value, &tosleep)) {
-            out_string(c, "CLIENT_ERROR bad command line format");
-            return;
-        }
-        if (tosleep > 1000000) {
-            out_string(c, "CLIENT_ERROR sleep must be one second or less");
-            return;
-        }
-        settings.lru_crawler_sleep = tosleep;
-        out_string(c, "OK");
-        return;
-    } else if (ntokens == 3) {
-        if ((strcmp(tokens[COMMAND_TOKEN + 1].value, "enable") == 0)) {
-            if (start_item_crawler_thread() == 0) {
-                out_string(c, "OK");
-            } else {
-                out_string(c, "ERROR failed to start lru crawler thread");
-            }
-        } else if ((strcmp(tokens[COMMAND_TOKEN + 1].value, "disable") == 0)) {
-            if (stop_item_crawler_thread(CRAWLER_NOWAIT) == 0) {
-                out_string(c, "OK");
-            } else {
-                out_string(c, "ERROR failed to stop lru crawler thread");
-            }
-        } else {
-            out_string(c, "ERROR");
-        }
-        return;
-    } else {
-        out_string(c, "ERROR");
-    }
-}
 #ifdef TLS
 static void process_refresh_certs_command(conn *c, token_t *tokens, const size_t ntokens) {
     set_noreply_maybe(c, tokens, ntokens);
@@ -2888,7 +2691,7 @@ void process_command_ascii(conn *c, char *command) {
 
     } else if (strcmp(tokens[COMMAND_TOKEN].value, "lru_crawler") == 0) {
 
-        process_lru_crawler_command(c, tokens, ntokens);
+        out_string(c, "ERROR - LRU not implemented.");
 
     } else if (strcmp(tokens[COMMAND_TOKEN].value, "watch") == 0) {
 
@@ -2897,9 +2700,6 @@ void process_command_ascii(conn *c, char *command) {
     } else if (strcmp(tokens[COMMAND_TOKEN].value, "verbosity") == 0) {
         WANT_TOKENS_OR(ntokens, 3, 4);
         process_verbosity_command(c, tokens, ntokens);
-    } else if (strcmp(tokens[COMMAND_TOKEN].value, "lru") == 0) {
-        WANT_TOKENS_MIN(ntokens, 3);
-        process_lru_command(c, tokens, ntokens);
 #ifdef MEMCACHED_DEBUG
     // commands which exist only for testing the memcached's security protection
     } else if (strcmp(tokens[COMMAND_TOKEN].value, "misbehave") == 0) {

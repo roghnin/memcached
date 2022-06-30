@@ -477,97 +477,9 @@ void storage_finalize_cb(io_pending_t *pending) {
 
 static int storage_write(void *storage, const int clsid, const int item_age) {
     int did_moves = 0;
-    struct lru_pull_tail_return it_info;
 
-    it_info.it = NULL;
-    lru_pull_tail(clsid, COLD_LRU, 0, LRU_PULL_RETURN_ITEM, 0, &it_info);
-    /* Item is locked, and we have a reference to it. */
-    if (it_info.it == NULL) {
-        return did_moves;
-    }
-
-    obj_io io;
-    item *it = it_info.it;
-    /* First, storage for the header object */
-    size_t orig_ntotal = ITEM_ntotal(it);
-    uint32_t flags;
-    if ((it->it_flags & ITEM_HDR) == 0 &&
-            (item_age == 0 || current_time - it->time > item_age)) {
-        FLAGS_CONV(it, flags);
-        item *hdr_it = do_item_alloc(ITEM_key(it), it->nkey, flags, it->exptime, sizeof(item_hdr));
-        /* Run the storage write understanding the start of the item is dirty.
-         * We will fill it (time/exptime/etc) from the header item on read.
-         */
-        if (hdr_it != NULL) {
-            int bucket = (it->it_flags & ITEM_CHUNKED) ?
-                PAGE_BUCKET_CHUNKED : PAGE_BUCKET_DEFAULT;
-            // Compress soon to expire items into similar pages.
-            if (it->exptime - current_time < settings.ext_low_ttl) {
-                bucket = PAGE_BUCKET_LOWTTL;
-            }
-            hdr_it->it_flags |= ITEM_HDR;
-            io.len = orig_ntotal;
-            io.mode = OBJ_IO_WRITE;
-            // NOTE: when the item is read back in, the slab mover
-            // may see it. Important to have refcount>=2 or ~ITEM_LINKED
-            assert(it->refcount >= 2);
-            // NOTE: write bucket vs free page bucket will disambiguate once
-            // lowttl feature is better understood.
-            if (extstore_write_request(storage, bucket, bucket, &io) == 0) {
-                // cuddle the hash value into the time field so we don't have
-                // to recalculate it.
-                item *buf_it = (item *) io.buf;
-                buf_it->time = it_info.hv;
-                // copy from past the headers + time headers.
-                // TODO: should be in items.c
-                if (it->it_flags & ITEM_CHUNKED) {
-                    // Need to loop through the item and copy
-                    item_chunk *sch = (item_chunk *) ITEM_schunk(it);
-                    int remain = orig_ntotal;
-                    int copied = 0;
-                    // copy original header
-                    int hdrtotal = ITEM_ntotal(it) - it->nbytes;
-                    memcpy((char *)io.buf+STORE_OFFSET, (char *)it+STORE_OFFSET, hdrtotal - STORE_OFFSET);
-                    copied = hdrtotal;
-                    // copy data in like it were one large object.
-                    while (sch && remain) {
-                        assert(remain >= sch->used);
-                        memcpy((char *)io.buf+copied, ((item_chunk_payload*)montage_open_read(sch->payload))->data, sch->used);
-                        // FIXME: use one variable?
-                        remain -= sch->used;
-                        copied += sch->used;
-                        sch = sch->next;
-                    }
-                } else {
-                    memcpy((char *)io.buf+STORE_OFFSET, (char *)it+STORE_OFFSET, io.len-STORE_OFFSET);
-                }
-                // crc what we copied so we can do it sequentially.
-                buf_it->it_flags &= ~ITEM_LINKED;
-                buf_it->exptime = crc32c(0, (char*)io.buf+STORE_OFFSET, orig_ntotal-STORE_OFFSET);
-                extstore_write(storage, &io);
-                item_hdr *hdr = (item_hdr *) ITEM_data(hdr_it); // Hs: no need to use montage_open_write here.
-                hdr->page_version = io.page_version;
-                hdr->page_id = io.page_id;
-                hdr->offset  = io.offset;
-                // overload nbytes for the header it
-                hdr_it->nbytes = it->nbytes;
-                /* success! Now we need to fill relevant data into the new
-                 * header and replace. Most of this requires the item lock
-                 */
-                /* CAS gets set while linking. Copy post-replace */
-                item_replace(it, hdr_it, it_info.hv);
-                ITEM_set_cas(hdr_it, ITEM_get_cas(it));
-                do_item_remove(hdr_it);
-                did_moves = 1;
-                LOGGER_LOG(NULL, LOG_EVICTIONS, LOGGER_EXTSTORE_WRITE, it, bucket);
-            } else {
-                /* Failed to write for some reason, can't continue. */
-                slabs_free(hdr_it, ITEM_ntotal(hdr_it), ITEM_clsid(hdr_it));
-            }
-        }
-    }
-    do_item_remove(it);
-    item_unlock(it_info.hv);
+    // TODO: without LRU, we need a new way to traverse the KV store.
+    // we're skipping storage_write for now.
     return did_moves;
 }
 

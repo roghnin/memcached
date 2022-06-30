@@ -160,8 +160,6 @@ void pause_threads(enum pause_thread_types type) {
     switch (type) {
         case PAUSE_ALL_THREADS:
             slabs_rebalancer_pause();
-            lru_maintainer_pause();
-            lru_crawler_pause();
 #ifdef EXTSTORE
             storage_compact_pause();
             storage_write_pause();
@@ -172,8 +170,6 @@ void pause_threads(enum pause_thread_types type) {
             break;
         case RESUME_ALL_THREADS:
             slabs_rebalancer_resume();
-            lru_maintainer_resume();
-            lru_crawler_resume();
 #ifdef EXTSTORE
             storage_compact_resume();
             storage_write_resume();
@@ -232,14 +228,8 @@ void stop_threads(void) {
 
     // stop each side thread.
     // TODO: Verify these all work if the threads are already stopped
-    stop_item_crawler_thread(CRAWLER_WAIT);
     if (settings.verbose > 0)
         fprintf(stderr, "stopped lru crawler\n");
-    if (settings.lru_maintainer_thread) {
-        stop_lru_maintainer_thread();
-        if (settings.verbose > 0)
-            fprintf(stderr, "stopped maintainer\n");
-    }
     if (settings.slab_reassign) {
         stop_slab_maintenance_thread();
         if (settings.verbose > 0)
@@ -504,8 +494,7 @@ static void *worker_libevent(void *arg) {
      * all threads have finished initializing.
      */
     me->l = logger_create();
-    me->lru_bump_buf = item_lru_bump_buf_create();
-    if (me->l == NULL || me->lru_bump_buf == NULL) {
+    if (me->l == NULL) {
         abort();
     }
 

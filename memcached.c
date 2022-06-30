@@ -213,7 +213,6 @@ void stats_reset(void) {
     stats_prefix_clear();
     STATS_UNLOCK();
     threadlocal_stats_reset();
-    item_stats_reset();
 }
 
 static void settings_init(void) {
@@ -259,10 +258,6 @@ static void settings_init(void) {
     settings.slab_chunk_size_max = settings.slab_page_size / 2;
     settings.sasl = false;
     settings.maxconns_fast = true;
-    settings.lru_crawler = false;
-    settings.lru_crawler_sleep = 100;
-    settings.lru_crawler_tocrawl = 0;
-    settings.lru_maintainer_thread = false;
     settings.lru_segmented = true;
     settings.hot_lru_pct = 20;
     settings.warm_lru_pct = 40;
@@ -1586,8 +1581,7 @@ enum store_item_type do_store_item(item *it, int comm, conn *c, const uint32_t h
 
         switch (comm) {
             case NREAD_ADD:
-                /* add only adds a nonexistent item, but promote to head of LRU */
-                do_item_update(old_it);
+                /* add only adds a nonexistent item */
                 break;
             case NREAD_CAS:
                 if (cas_res == CAS_MATCH) {
@@ -1859,13 +1853,6 @@ void server_stats(ADD_STAT add_stats, conn *c) {
         APPEND_STAT("slab_reassign_running", "%u", stats_state.slab_reassign_running);
         APPEND_STAT("slabs_moved", "%llu", stats.slabs_moved);
     }
-    if (settings.lru_crawler) {
-        APPEND_STAT("lru_crawler_running", "%u", stats_state.lru_crawler_running);
-        APPEND_STAT("lru_crawler_starts", "%u", stats.lru_crawler_starts);
-    }
-    if (settings.lru_maintainer_thread) {
-        APPEND_STAT("lru_maintainer_juggles", "%llu", (unsigned long long)stats.lru_maintainer_juggles);
-    }
     APPEND_STAT("malloc_fails", "%llu",
                 (unsigned long long)stats.malloc_fails);
     APPEND_STAT("log_worker_dropped", "%llu", (unsigned long long)stats.log_worker_dropped);
@@ -1937,7 +1924,6 @@ void process_stat_settings(ADD_STAT add_stats, void *c) {
     APPEND_STAT("flush_enabled", "%s", settings.flush_enabled ? "yes" : "no");
     APPEND_STAT("dump_enabled", "%s", settings.dump_enabled ? "yes" : "no");
     APPEND_STAT("hash_algorithm", "%s", settings.hash_algorithm);
-    APPEND_STAT("lru_maintainer_thread", "%s", settings.lru_maintainer_thread ? "yes" : "no");
     APPEND_STAT("lru_segmented", "%s", settings.lru_segmented ? "yes" : "no");
     APPEND_STAT("hot_lru_pct", "%d", settings.hot_lru_pct);
     APPEND_STAT("warm_lru_pct", "%d", settings.warm_lru_pct);
@@ -1949,7 +1935,6 @@ void process_stat_settings(ADD_STAT add_stats, void *c) {
     APPEND_STAT("watcher_logbuf_size", "%u", settings.logger_watcher_buf_size);
     APPEND_STAT("worker_logbuf_size", "%u", settings.logger_buf_size);
     APPEND_STAT("read_buf_mem_limit", "%u", settings.read_buf_mem_limit);
-    APPEND_STAT("track_sizes", "%s", item_stats_sizes_status() ? "yes" : "no");
     APPEND_STAT("inline_ascii_response", "%s", "no"); // setting is dead, cannot be yes.
 #ifdef HAVE_DROP_PRIVILEGES
     APPEND_STAT("drop_privileges", "%s", settings.drop_privileges ? "yes" : "no");
@@ -1999,17 +1984,8 @@ bool get_stats(const char *stat_type, int nkey, ADD_STAT add_stats, void *c) {
             APPEND_STAT("total_items", "%llu", (unsigned long long)stats.total_items);
             STATS_UNLOCK();
             APPEND_STAT("slab_global_page_pool", "%u", global_page_pool_size(NULL));
-            item_stats_totals(add_stats, c);
-        } else if (nz_strcmp(nkey, stat_type, "items") == 0) {
-            item_stats(add_stats, c);
         } else if (nz_strcmp(nkey, stat_type, "slabs") == 0) {
             slabs_stats(add_stats, c);
-        } else if (nz_strcmp(nkey, stat_type, "sizes") == 0) {
-            item_stats_sizes(add_stats, c);
-        } else if (nz_strcmp(nkey, stat_type, "sizes_enable") == 0) {
-            item_stats_sizes_enable(add_stats, c);
-        } else if (nz_strcmp(nkey, stat_type, "sizes_disable") == 0) {
-            item_stats_sizes_disable(add_stats, c);
         } else {
             ret = false;
         }
@@ -2283,14 +2259,11 @@ enum delta_result_type do_add_delta(conn *c, const char *key, const size_t nkey,
         /* We also need to fiddle it in the sizes tracker in case the tracking
          * was enabled at runtime, since it relies on the CAS value to know
          * whether to remove an item or not. */
-        item_stats_sizes_remove(it);
         ITEM_set_cas(it, (settings.use_cas) ? get_cas_id() : 0);
-        item_stats_sizes_add(it);
         montage_open_write(&it->payload, ITEM_ntotal_payload(it));
         memcpy(ITEM_data(it), buf, res);
         memset(ITEM_data(it) + res, ' ', it->nbytes - res - 2);
         montage_register_write(it->payload);
-        do_item_update(it);
     } else if (it->refcount > 1) {
         item *new_it;
         uint32_t flags;
@@ -4681,8 +4654,6 @@ int main (int argc, char **argv) {
     bool protocol_specified = false;
     bool tcp_specified = false;
     bool udp_specified = false;
-    bool start_lru_maintainer = true;
-    bool start_lru_crawler = true;
     bool start_assoc_maint = true;
     enum hashfunc_type hash_type = MURMUR3_HASH;
     uint32_t tocrawl;
@@ -4839,9 +4810,6 @@ int main (int argc, char **argv) {
         return 1;
     }
 #endif
-
-    /* Run regardless of initializing it later */
-    init_lru_maintainer();
 
     /* set stderr non-buffering (for running under, say, daemontools) */
     setbuf(stderr, NULL);
@@ -5249,7 +5217,6 @@ int main (int argc, char **argv) {
                 }
                 break;
             case LRU_CRAWLER:
-                start_lru_crawler = true;
                 break;
             case LRU_CRAWLER_SLEEP:
                 if (subopts_value == NULL) {
@@ -5274,8 +5241,6 @@ int main (int argc, char **argv) {
                 settings.lru_crawler_tocrawl = tocrawl;
                 break;
             case LRU_MAINTAINER:
-                start_lru_maintainer = true;
-                settings.lru_segmented = true;
                 break;
             case HOT_LRU_PCT:
                 if (subopts_value == NULL) {
@@ -5369,9 +5334,6 @@ int main (int argc, char **argv) {
                 }
                 slab_chunk_size_changed = true;
                 break;
-            case TRACK_SIZES:
-                item_stats_sizes_init();
-                break;
             case NO_INLINE_ASCII_RESP:
                 break;
             case INLINE_ASCII_RESP:
@@ -5389,12 +5351,8 @@ int main (int argc, char **argv) {
                 settings.maxconns_fast = false;
                 break;
             case NO_LRU_CRAWLER:
-                settings.lru_crawler = false;
-                start_lru_crawler = false;
                 break;
             case NO_LRU_MAINTAINER:
-                start_lru_maintainer = false;
-                settings.lru_segmented = false;
                 break;
             case META_RESPONSE_OLD:
                 settings.meta_response_old = true;
@@ -5527,10 +5485,7 @@ int main (int argc, char **argv) {
                 settings.slab_reassign = false;
                 settings.slab_automove = 0;
                 settings.maxconns_fast = false;
-                settings.lru_segmented = false;
                 hash_type = JENKINS_HASH;
-                start_lru_crawler = false;
-                start_lru_maintainer = false;
                 break;
             case NO_DROP_PRIVILEGES:
                 settings.drop_privileges = false;
@@ -5674,16 +5629,6 @@ int main (int argc, char **argv) {
     } else if (!meta->slab_config) {
         // using the default factor.
         meta->slab_config = "1.25";
-    }
-
-    if (settings.hot_lru_pct + settings.warm_lru_pct > 80) {
-        fprintf(stderr, "hot_lru_pct + warm_lru_pct cannot be more than 80%% combined\n");
-        exit(EX_USAGE);
-    }
-
-    if (settings.temp_lru && !start_lru_maintainer) {
-        fprintf(stderr, "temporary_ttl requires lru_maintainer to be enabled\n");
-        exit(EX_USAGE);
     }
 
     if (hash_init(hash_type) != 0) {
@@ -5990,17 +5935,11 @@ int main (int argc, char **argv) {
 #ifdef EXTSTORE
     slabs_set_storage(storage);
     memcached_thread_init(settings.num_threads, storage);
-    init_lru_crawler(storage);
 #else
     memcached_thread_init(settings.num_threads, NULL);
-    init_lru_crawler(NULL);
 #endif
 
     if (start_assoc_maint && start_assoc_maintenance_thread() == -1) {
-        exit(EXIT_FAILURE);
-    }
-    if (start_lru_crawler && start_item_crawler_thread() != 0) {
-        fprintf(stderr, "Failed to enable LRU crawler thread\n");
         exit(EXIT_FAILURE);
     }
 #ifdef EXTSTORE
@@ -6012,15 +5951,7 @@ int main (int argc, char **argv) {
         fprintf(stderr, "Failed to start storage writer thread\n");
         exit(EXIT_FAILURE);
     }
-
-    if (start_lru_maintainer && start_lru_maintainer_thread(storage) != 0) {
-#else
-    if (start_lru_maintainer && start_lru_maintainer_thread(NULL) != 0) {
 #endif
-        fprintf(stderr, "Failed to enable LRU maintainer thread\n");
-        free(meta);
-        return 1;
-    }
 
     if (settings.slab_reassign &&
         start_slab_maintenance_thread() == -1) {
