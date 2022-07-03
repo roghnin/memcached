@@ -5923,6 +5923,7 @@ int main (int argc, char **argv) {
         // should have the old base in 'meta' as of here.
     }
 
+    montage_set_env("StrictEpochBoundary", "true");
     montage_set_env("EpochLength", "10");
     montage_set_env("EpochLengthUnit", "Microsecond");
     montage_init(MONTAGE_THREAD_CNT);
