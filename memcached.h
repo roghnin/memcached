@@ -572,6 +572,7 @@ extern struct settings settings;
  * item payload structure for Montage
  */
 typedef struct _itempayload {
+    uint64_t dummy;
     /* this odd type prevents type-punning issues when we do
      * the little shuffle to save space when not using CAS. */
     union {
@@ -630,6 +631,7 @@ typedef struct {
  * item chunk payload structure for Montage 
  */
 typedef struct _item_chunk_payload{
+    uint64_t dummy;
     char data[];
 } item_chunk_payload;
 
