@@ -513,8 +513,6 @@ static void *worker_libevent(void *arg) {
         drop_worker_privileges();
     }
 
-    montage_init_thread(me->montage_tid);
-
     register_thread_initialized();
 
     event_base_loop(me->base, 0);
@@ -1077,7 +1075,6 @@ void memcached_thread_init(int nthreads, void *arg) {
         threads[i].storage = arg;
 #endif
         setup_thread(&threads[i]);
-        threads[i].montage_tid = i + 1;
         /* Reserve three fds for the libevent base, and two for the pipe */
         stats_state.reserved_fds += 5;
     }

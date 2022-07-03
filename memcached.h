@@ -51,8 +51,6 @@
 #include <openssl/ssl.h>
 #endif
 
-#include "montage_global_api_c.h"
-
 /* We don't yet know how Montage would handle these options */
 #ifdef NEED_ALIGN
 #error Montage cannost handle NEED_ALIGN
@@ -149,8 +147,8 @@
 #define ITEM_ntotal(item) (ITEM_ntotal_transient(item) \
          + ITEM_ntotal_payload(item))
 
-#define Montage_malloc(sz) (montage_malloc_raw(sz))
-#define Montage_free(p) (montage_free_raw(p))
+#define Montage_malloc(sz) (malloc(sz))
+#define Montage_free(p) (free(p))
 
 #define ITEM_clsid(item) ((item)->slabs_clsid & ~(3<<6))
 #define ITEM_lruid(item) ((item)->slabs_clsid & (3<<6))
@@ -574,8 +572,6 @@ extern struct settings settings;
  * item payload structure for Montage
  */
 typedef struct _itempayload {
-    montage_meta_t mmeta;
-
     /* this odd type prevents type-punning issues when we do
      * the little shuffle to save space when not using CAS. */
     union {
@@ -634,8 +630,6 @@ typedef struct {
  * item chunk payload structure for Montage 
  */
 typedef struct _item_chunk_payload{
-    montage_meta_t mmeta;
-
     char data[];
 } item_chunk_payload;
 
@@ -750,7 +744,6 @@ typedef struct {
     void *proxy_stats;
     // TODO: add ctx object so we can attach to queue.
 #endif
-    int montage_tid;
 } LIBEVENT_THREAD;
 
 /**

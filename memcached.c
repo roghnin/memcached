@@ -5914,8 +5914,6 @@ int main (int argc, char **argv) {
         // should have the old base in 'meta' as of here.
     }
 
-    montage_init(settings.num_threads + 1);
-    montage_init_thread(0);
 
     // Initialize the hash table _after_ checking restart metadata.
     // We override the hash table start argument with what was live
