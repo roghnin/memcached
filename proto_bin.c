@@ -119,9 +119,7 @@ int try_read_command_binary(conn *c) {
         c->rbytes -= sizeof(c->binary_header) + extlen + keylen;
         c->rcurr += sizeof(c->binary_header) + extlen + keylen;
 
-        montage_begin_op();
         dispatch_bin_command(c, extbuf);
-        montage_end_op();
     }
 
     return 1;
