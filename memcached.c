@@ -1463,7 +1463,6 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
         }
     }
 
-    montage_begin_op();
     if (s_it->it_flags & ITEM_CHUNKED) {
         int remain = len;
         item_chunk *sch = (item_chunk *) ITEM_schunk(s_it);
@@ -1522,7 +1521,6 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
         }
         assert(len == done);
     }
-    montage_end_op();
     return 0;
 }
 
@@ -2873,7 +2871,6 @@ static int read_into_chunked_item(conn *c) {
     int res;
     assert(c->rcurr != c->ritem);
     
-    montage_begin_op();
     while (c->rlbytes > 0) {
         item_chunk *ch = (item_chunk *)c->ritem;
         if (ch->size == ch->used) {
@@ -2946,7 +2943,6 @@ static int read_into_chunked_item(conn *c) {
             }
         }
     }
-    montage_end_op();
     return total;
 }
 

@@ -298,7 +298,6 @@ int storage_get_item(conn *c, item *it, mc_resp *resp) {
         eio->iov[0].iov_len = ITEM_ntotal(new_it) - new_it->nbytes;
         ciovcnt++;
         
-        montage_begin_op();
         while (remain > 0) {
             chunk = do_item_alloc_chunk(chunk, remain);
             // FIXME: _pure evil_, silently erroring if item is too large.
@@ -318,7 +317,6 @@ int storage_get_item(conn *c, item *it, mc_resp *resp) {
             remain -= chunk->size;
             ciovcnt++;
         }
-        montage_end_op();
 
         eio->iovcnt = ciovcnt;
     }
