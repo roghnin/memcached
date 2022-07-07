@@ -1463,6 +1463,7 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
         }
     }
 
+    montage_begin_op();
     if (s_it->it_flags & ITEM_CHUNKED) {
         int remain = len;
         item_chunk *sch = (item_chunk *) ITEM_schunk(s_it);
@@ -1521,6 +1522,7 @@ static int _store_item_copy_chunks(item *d_it, item *s_it, const int len) {
         }
         assert(len == done);
     }
+    montage_end_op();
     return 0;
 }
 
@@ -2286,10 +2288,9 @@ enum delta_result_type do_add_delta(conn *c, const char *key, const size_t nkey,
         item_stats_sizes_remove(it);
         ITEM_set_cas(it, (settings.use_cas) ? get_cas_id() : 0);
         item_stats_sizes_add(it);
-        montage_open_write(&it->payload, ITEM_ntotal_payload(it));
         memcpy(ITEM_data(it), buf, res);
         memset(ITEM_data(it) + res, ' ', it->nbytes - res - 2);
-        montage_register_write(it->payload);
+        montage_register_write_relaxed(it->payload, ITEM_ntotal_payload(it));
         do_item_update(it);
     } else if (it->refcount > 1) {
         item *new_it;
@@ -2300,10 +2301,9 @@ enum delta_result_type do_add_delta(conn *c, const char *key, const size_t nkey,
             do_item_remove(it);
             return EOM;
         }
-        montage_open_write(&it->payload, ITEM_ntotal_payload(it));
         memcpy(ITEM_data(new_it), buf, res);
         memcpy(ITEM_data(new_it) + res, "\r\n", 2);
-        montage_register_write(it->payload);
+        montage_register_write_relaxed(it->payload, ITEM_ntotal_payload(it));
         item_replace(it, new_it, hv);
         // Overwrite the older item's CAS with our new CAS since we're
         // returning the CAS of the old item below.
@@ -2577,7 +2577,7 @@ static int _transmit_pre(conn *c, struct iovec *iovs, int iovused, bool one_resp
                             skip = done;
                             done = 0;
                         }
-                        iovs[iovused].iov_base = ((item_chunk_payload*)montage_open_read(ch->payload))->data + skip;
+                        iovs[iovused].iov_base = ch->payload->data + skip;
                         // Stupid binary protocol makes this go negative.
                         iovs[iovused].iov_len = ch->used - skip > todo ? todo : ch->used - skip;
                         iovused++;
@@ -2872,7 +2872,8 @@ static int read_into_chunked_item(conn *c) {
     int total = 0;
     int res;
     assert(c->rcurr != c->ritem);
-
+    
+    montage_begin_op();
     while (c->rlbytes > 0) {
         item_chunk *ch = (item_chunk *)c->ritem;
         if (ch->size == ch->used) {
@@ -2914,7 +2915,7 @@ static int read_into_chunked_item(conn *c) {
             }
         } else {
             /*  now try reading from the socket */
-            res = c->read(c, ((item_chunk_payload*)montage_open_read(ch->payload))->data + ch->used,
+            res = c->read(c, ch->payload->data + ch->used,
                     (unused > c->rlbytes ? c->rlbytes : unused));
             if (res > 0) {
                 pthread_mutex_lock(&c->thread->stats.mutex);
@@ -2945,6 +2946,7 @@ static int read_into_chunked_item(conn *c) {
             }
         }
     }
+    montage_end_op();
     return total;
 }
 
@@ -2965,8 +2967,6 @@ static void drive_machine(conn *c) {
     assert(c != NULL);
 
     while (!stop) {
-        montage_begin_op();
-
         switch(c->state) {
         case conn_listening:
             addrlen = sizeof(addr);
@@ -3373,7 +3373,6 @@ static void drive_machine(conn *c) {
             assert(false);
             break;
         }
-        montage_end_op();
     }
 
     return;

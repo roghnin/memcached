@@ -418,7 +418,6 @@ static void *item_crawler_thread(void *arg) {
     while (do_run_lru_crawler_thread) {
     pthread_cond_wait(&lru_crawler_cond, &lru_crawler_lock);
 
-    montage_begin_op();
     if (crawler_count == -1) {
         item_crawl_hash();
         crawler_count = 0;
@@ -498,8 +497,6 @@ static void *item_crawler_thread(void *arg) {
         }
     } // while
     } // if crawler_count
-
-    montage_end_op();
 
     if (active_crawler_mod.mod != NULL) {
         if (active_crawler_mod.mod->finalize != NULL)

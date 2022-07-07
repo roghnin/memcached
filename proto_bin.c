@@ -369,20 +369,18 @@ static void complete_update_bin(conn *c) {
     /* We don't actually receive the trailing two characters in the bin
      * protocol, so we're going to just set them here */
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
-        montage_open_write(&it->payload, ITEM_ntotal_payload(it));
         *(ITEM_data(it) + it->nbytes - 2) = '\r';
         *(ITEM_data(it) + it->nbytes - 1) = '\n';
-        montage_register_write(it->payload);
+        montage_register_write_relaxed(it->payload, ITEM_ntotal_payload(it));
     } else {
         assert(c->ritem);
         item_chunk *ch = (item_chunk *) c->ritem;
         if (ch->size == ch->used)
             ch = ch->next;
         assert(ch->size - ch->used >= 2);
-        montage_open_write(&ch->payload, ITEM_chunk_ntotal_payload(ch));
         ch->payload->data[ch->used] = '\r';
         ch->payload->data[ch->used + 1] = '\n';
-        montage_register_write(ch->payload);
+        montage_register_write_relaxed(ch->payload, ITEM_ntotal_payload(it));
         ch->used += 2;
     }
 

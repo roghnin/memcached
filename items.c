@@ -264,6 +264,7 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
     if (id == 0)
         return 0;
 
+    montage_begin_op();
     /* This is a large item. Allocate a header object now, lazily allocate
      *  chunks while reading the upload.
      */
@@ -296,6 +297,7 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
                 (settings.use_cas? sizeof(uint64_t) : 0));
         }
     }
+    montage_end_op();
 
     if (it == NULL) {
         pthread_mutex_lock(&lru_locks[id]);
@@ -1614,8 +1616,6 @@ static void *lru_maintainer_thread(void *arg) {
         stats.lru_maintainer_juggles++;
         STATS_UNLOCK();
 
-        montage_begin_op();
-
         /* Each slab class gets its own sleep to avoid hammering locks */
         for (i = POWER_SMALLEST; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
             next_juggles[i] = next_juggles[i] > last_sleep ? next_juggles[i] - last_sleep : 0;
@@ -1680,7 +1680,6 @@ static void *lru_maintainer_thread(void *arg) {
             }
         }
 
-        montage_end_op();
     }
     pthread_mutex_unlock(&lru_maintainer_lock);
     sam->free(am);

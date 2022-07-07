@@ -101,9 +101,8 @@ static void _finalize_mset(conn *c, enum store_item_type ret) {
                 break;
             case 'k':
                 // Encode the key here instead of earlier to minimize copying.
-                montage_open_write(&it->payload, ITEM_ntotal_payload(it));
                 META_KEY(p, ITEM_key(it), it->nkey, (it->it_flags & ITEM_KEY_BINARY));
-                montage_register_write(it->payload);
+                montage_register_write_relaxed(it->payload, ITEM_ntotal_payload(it));
                 break;
             case 'c':
                 // We don't have the CAS until this point, which is why we
@@ -152,14 +151,14 @@ void complete_nread_ascii(conn *c) {
          * chunks.
          */
         if (ch->used > 1) {
-            item_chunk_payload* payload_tmp = montage_open_read(ch->payload);
+            item_chunk_payload* payload_tmp = ch->payload;
             buf[0] = payload_tmp->data[ch->used - 2];
             buf[1] = payload_tmp->data[ch->used - 1];
         } else {
             assert(ch->prev);
             assert(ch->used == 1);
-            buf[0] = ((item_chunk_payload*)montage_open_read(ch->prev->payload))->data[ch->prev->used - 1];
-            buf[1] = ((item_chunk_payload*)montage_open_read(ch->payload))->data[ch->used - 1];
+            buf[0] = ch->prev->payload->data[ch->prev->used - 1];
+            buf[1] = ch->payload->data[ch->used - 1];
         }
         if (strncmp(buf, "\r\n", 2) == 0) {
             is_valid = true;
@@ -1225,9 +1224,8 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
                     p += tokens[i].length;
                     break;
                 case 'k':
-                    montage_open_write(&it->payload, ITEM_ntotal_payload(it));
                     META_KEY(p, ITEM_key(it), it->nkey, (it->it_flags & ITEM_KEY_BINARY));
-                    montage_register_write(it->payload);
+                    montage_register_write_relaxed(it->payload, ITEM_ntotal_payload(it));
                     break;
             }
         }

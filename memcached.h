@@ -121,12 +121,12 @@
 
 /* warning: don't use these macros with a function, as it evals its arg twice */
 #define ITEM_get_cas(i) (((i)->it_flags & ITEM_CAS) ? \
-        ((struct _itempayload*)montage_open_read((i)->payload))->data->cas : (uint64_t)0)
+        (i)->payload->data->cas : (uint64_t)0)
 
 #define ITEM_set_cas(i,v) { \
     if ((i)->it_flags & ITEM_CAS) { \
-        ((struct _itempayload*)montage_open_write(&((i)->payload), ITEM_ntotal_payload(i)))->data->cas = v; \
-        montage_register_write((i)->payload); \
+        (i)->payload->data->cas = v; \
+        montage_register_write_relaxed((i)->payload, ITEM_ntotal_payload(i)); \
     } \
 }
 
@@ -152,8 +152,8 @@
 
 #define ITEM_chunk_ntotal_payload(item_chunk) (item_chunk->size + sizeof(struct _item_chunk_payload))
 
-#define Montage_malloc(sz) (montage_malloc(sz))
-#define Montage_free(p) (montage_free(p))
+#define Montage_malloc(sz) (montage_malloc_relaxed(sz))
+#define Montage_free(p) (montage_free_relaxed(p))
 #define Montage_memcpy(payload_p, payload_sz, dst, src, sz) (montage_memcpy(payload_p, payload_sz, dst, src, sz))
 #define Montage_memmove(payload_p, payload_sz, dst, src, sz) (montage_memmove(payload_p, payload_sz, dst, src, sz))
 
