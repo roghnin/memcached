@@ -511,6 +511,7 @@ static void do_slabs_free(void *ptr, const size_t size, unsigned int id) {
     MEMCACHED_SLABS_FREE(size, id, ptr);
     p = &slabclass[id];
 
+    montage_begin_op();
     it = (item *)ptr;
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
         if (it->payload) {
@@ -528,6 +529,7 @@ static void do_slabs_free(void *ptr, const size_t size, unsigned int id) {
     } else {
         do_slabs_free_chunked(it, size);
     }
+    montage_end_op();
     return;
 }
 

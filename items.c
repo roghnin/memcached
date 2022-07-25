@@ -264,7 +264,6 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
     if (id == 0)
         return 0;
 
-    montage_begin_op();
     /* This is a large item. Allocate a header object now, lazily allocate
      *  chunks while reading the upload.
      */
@@ -297,7 +296,6 @@ item *do_item_alloc(char *key, const size_t nkey, const unsigned int flags,
                 (settings.use_cas? sizeof(uint64_t) : 0));
         }
     }
-    montage_end_op();
 
     if (it == NULL) {
         pthread_mutex_lock(&lru_locks[id]);
