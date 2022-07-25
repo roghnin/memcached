@@ -768,7 +768,7 @@ static int slab_rebalance_start(void) {
      */
     slab_rebal.slab_start = s_cls->slab_list[0];
     slab_rebal.slab_end   = (char *)slab_rebal.slab_start +
-        (s_cls->size * s_cls->perslab);
+        (s_cls->transient_size * s_cls->perslab);
     slab_rebal.slab_pos   = slab_rebal.slab_start;
     slab_rebal.done       = 0;
     // Don't need to do chunk move work if page is in global pool.
@@ -872,7 +872,7 @@ static int slab_rebalance_move(void) {
 
     s_cls = &slabclass[slab_rebal.s_clsid];
     // the offset to check if completed or not
-    int offset = ((char*)slab_rebal.slab_pos-(char*)slab_rebal.slab_start)/(s_cls->size);
+    int offset = ((char*)slab_rebal.slab_pos-(char*)slab_rebal.slab_start)/(s_cls->transient_size);
 
     // skip acquiring the slabs lock for items we've already fully processed.
     if (slab_rebal.completed[offset] == 0) {
@@ -971,8 +971,9 @@ static int slab_rebalance_move(void) {
                  * refcount 1 (just our own, then fall through and wipe it
                  */
                 /* Check if expired or flushed */
-                ntotal = ITEM_ntotal_transient(it);
+                ntotal = ITEM_ntotal(it);
 #ifdef EXTSTORE
+                // Hs: This option is not working. Payload-based memory allocation don't have EXTSTORE in mind.
                 if (it->it_flags & ITEM_HDR) {
                     ntotal = (ntotal - it->nbytes) + sizeof(item_hdr);
                 }
@@ -1006,7 +1007,15 @@ static int slab_rebalance_move(void) {
                     if (ch == NULL) {
                         assert((new_it->it_flags & ITEM_CHUNKED) == 0);
                         /* if free memory, memcpy. clear prev/next/h_bucket */
-                        memcpy(new_it, it, ntotal);
+                        memcpy(new_it, it, ITEM_ntotal_transient(it));
+                        // Hs: we copy payload here rather than in do_item_replace,
+                        // because do_item_replace is a general-purpose
+                        // function that takes care of both chunked and non-chunked
+                        // items.
+                        if (it->payload) {
+                            new_it->payload = Montage_malloc(ITEM_ntotal_payload(it));
+                            memcpy(new_it->payload, it->payload, ITEM_ntotal_payload(it));                            
+                        }
                         new_it->prev = 0;
                         new_it->next = 0;
                         new_it->h_next = 0;
@@ -1035,7 +1044,11 @@ static int slab_rebalance_move(void) {
                         ch->prev->next = nch;
                         if (ch->next)
                             ch->next->prev = nch;
-                        memcpy(nch, ch, ch->used + sizeof(item_chunk));
+                        memcpy(nch, ch, sizeof(item_chunk));
+                        if (ch->payload){
+                            nch->payload = Montage_malloc(sizeof(struct _item_chunk_payload) + ch->size);
+                            memcpy(nch->payload, ch->payload, sizeof(struct _item_chunk_payload) + ch->size);
+                        }
                         ch->refcount = 0;
                         ch->it_flags = ITEM_SLABBED|ITEM_FETCHED;
                         slab_rebal.chunk_rescues++;
@@ -1058,7 +1071,7 @@ static int slab_rebalance_move(void) {
 #endif
                         slab_rebal.completed[offset] = 1;
                     } else {
-                        ntotal = ITEM_ntotal_transient(it);
+                        ntotal = ITEM_ntotal(it);
                         do_item_unlink(it, hv);
                         slabs_free(it, ntotal, slab_rebal.s_clsid);
                         /* Swing around again later to remove it from the freelist. */
@@ -1096,7 +1109,7 @@ static int slab_rebalance_move(void) {
     // Note: slab_rebal.* is occasionally protected under slabs_lock, but
     // the mover thread is the only user while active: so it's only necessary
     // for start/stop synchronization.
-    slab_rebal.slab_pos = (char *)slab_rebal.slab_pos + s_cls->size;
+    slab_rebal.slab_pos = (char *)slab_rebal.slab_pos + s_cls->transient_size;
 
     if (slab_rebal.slab_pos >= slab_rebal.slab_end) {
         /* Some items were busy, start again from the top */
