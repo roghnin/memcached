@@ -1225,6 +1225,7 @@ static void *slab_rebalance_thread(void *arg) {
     int was_busy = 0;
     int backoff_timer = 1;
     int backoff_max = 1000;
+    montage_init_thread(SLAB_REBALANCE_MONTAGE_TID);
     /* So we first pass into cond_wait with the mutex held */
     mutex_lock(&slabs_rebalance_lock);
 
@@ -1238,7 +1239,9 @@ static void *slab_rebalance_thread(void *arg) {
 
             was_busy = 0;
         } else if (slab_rebalance_signal && slab_rebal.slab_start != NULL) {
+            montage_begin_op();
             was_busy = slab_rebalance_move();
+            montage_end_op();
         }
 
         if (slab_rebal.done) {
