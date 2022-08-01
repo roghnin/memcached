@@ -152,6 +152,12 @@
 #define Montage_malloc(sz) (montage_malloc_raw(sz))
 #define Montage_free(p) (montage_free_raw(p))
 
+// num_thread + main thread + lru maintainer thread + crawler thread + slab rebalance thread
+#define MONTAGE_THREAD_CNT (settings.num_threads + 4)
+#define LRU_MAINTAINER_MONTAGE_TID (settings.num_threads + 1)
+#define CRAWLER_MONTAGE_TID (settings.num_threads + 2)
+#define SLAB_REBALANCE_MONTAGE_TID (settings.num_threads + 3)
+
 #define ITEM_clsid(item) ((item)->slabs_clsid & ~(3<<6))
 #define ITEM_lruid(item) ((item)->slabs_clsid & (3<<6))
 

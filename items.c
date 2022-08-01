@@ -1586,6 +1586,7 @@ static void *lru_maintainer_thread(void *arg) {
         fprintf(stderr, "Failed to allocate crawler data for LRU maintainer thread\n");
         abort();
     }
+    montage_init_thread(LRU_MAINTAINER_MONTAGE_TID);
     pthread_mutex_init(&cdata->lock, NULL);
     cdata->crawl_complete = true; // kick off the crawler.
     logger *l = logger_create();
