@@ -5924,7 +5924,9 @@ int main (int argc, char **argv) {
     }
 
     montage_set_env("StrictEpochBoundary", "true");
-    montage_set_env("EpochLength", "50");
+    // montage_set_env("StrictEpochBoundary", "false");
+    // montage_set_env("EnableOldSeeNew", "false");
+    montage_set_env("EpochLength", "1");
     montage_set_env("EpochLengthUnit", "Millisecond");
     montage_init(MONTAGE_THREAD_CNT);
     montage_init_thread(0);
